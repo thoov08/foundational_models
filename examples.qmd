@@ -1,0 +1,163 @@
+---
+title: "Untitled"
+format: html
+---
+
+
+
+Classification (multi-class)
+
+```{python}
+from tabpfn import TabPFNClassifier
+from sklearn.datasets import load_iris
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+
+# Load the Iris dataset
+X, y = load_iris(return_X_y=True)
+
+# Split data
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Initialize and train classifier
+classifier = TabPFNClassifier()
+classifier.fit(X_train, y_train)
+
+# Evaluate
+y_pred = classifier.predict(X_test)
+print('Test Accuracy:', accuracy_score(y_test, y_pred))
+```
+
+
+Regression
+
+```{python}
+from tabpfn import TabPFNRegressor
+from sklearn.datasets import load_diabetes
+from sklearn.model_selection import train_test_split
+import numpy as np
+import sklearn
+from sklearn.ensemble import RandomForestRegressor
+
+reg = TabPFNRegressor(device='auto')
+X, y = load_diabetes(return_X_y=True)
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33, random_state=42)
+reg.fit(X_train, y_train)
+preds = reg.predict(X_test)
+
+print('Mean Squared Error (MSE): ', sklearn.metrics.mean_squared_error(y_test, preds))
+print('Mean Absolute Error (MAE): ', sklearn.metrics.mean_absolute_error(y_test, preds))
+print('R-squared (R^2): ', sklearn.metrics.r2_score(y_test, preds))
+
+
+# Compare to random forest model
+
+rf_reg = RandomForestRegressor(random_state=42)
+rf_reg.fit(X_train, y_train)
+rf_preds = rf_reg.predict(X_test)
+
+print('Random Forest - Mean Squared Error (MSE): ', sklearn.metrics.mean_squared_error(y_test, rf_preds))
+print('Random Forest - Mean Absolute Error (MAE): ', sklearn.metrics.mean_absolute_error(y_test, rf_preds))
+print('Random Forest - R-squared (R^2): ', sklearn.metrics.r2_score(y_test, rf_preds))
+
+```
+
+
+
+Time series
+
+TabPFN performs time series forecasting by:
+
+- Converting time series data into a tabular format
+- Extracting temporal features (trends, seasonality, etc.)
+- Using TabPFN's regression capabilities for prediction
+- Converting predictions back to time series format
+
+This approach provides several benefits:
+
+- Zero-shot forecasting: No training required - just fit and predict
+- Both point and probabilistic forecasts: Get confidence intervals with your predictions
+- Support for exogenous variables: Easily incorporate external factors
+- pip install tabpfn-time-seriesFast inference: Uses tabpfn-client for GPU-accelerated predictions
+
+```{python}
+dataset_metadata = {
+    "monash_tourism_monthly": {"prediction_length": 24},
+    "m4_hourly": {"prediction_length": 48},
+}
+
+dataset_choice = "monash_tourism_monthly"
+num_time_series_subset = 2
+```
+
+```{python}
+from datasets import load_dataset
+from autogluon.timeseries import TimeSeriesDataFrame
+
+from tabpfn_time_series.data_preparation import to_gluonts_univariate, generate_test_X
+
+prediction_length = dataset_metadata[dataset_choice]['prediction_length']
+dataset = load_dataset("autogluon/chronos_datasets", dataset_choice)
+
+tsdf = TimeSeriesDataFrame(to_gluonts_univariate(dataset['train']))
+tsdf = tsdf[tsdf.index.get_level_values('item_id').isin(tsdf.item_ids[:num_time_series_subset])]
+train_tsdf, test_tsdf_ground_truth = tsdf.train_test_split(prediction_length=prediction_length)
+test_tsdf = generate_test_X(train_tsdf, prediction_length)
+```
+
+
+```{python}
+# plot the actual time series
+from tabpfn_time_series.plot import plot_actual_ts
+
+plot_actual_ts(train_tsdf, test_tsdf_ground_truth)
+```
+
+
+```{python}
+# pass whatever features we want into the FeatureTransformer
+# the paper suggests running_index and add_calendar features are often helpful for ts models, but remove these and add others as needed
+from tabpfn_time_series import FeatureTransformer, DefaultFeatures
+
+selected_features = [
+    DefaultFeatures.add_running_index,
+    DefaultFeatures.add_calendar_features,
+]
+
+train_tsdf, test_tsdf = FeatureTransformer.add_features(
+    train_tsdf, test_tsdf, selected_features
+)
+```
+
+```{python}
+# review training data - note the new features added
+train_tsdf.head()
+```
+
+```{python}
+# same features added for test sample
+test_tsdf.head()
+```
+
+```{python}
+# fit the model
+from tabpfn_time_series import TabPFNTimeSeriesPredictor, TabPFNMode
+
+predictor = TabPFNTimeSeriesPredictor(
+    tabpfn_mode=TabPFNMode.CLIENT,    # can switch "CLIENT" to "LOCAL" to run purely locally, but GPU is required
+)
+
+pred = predictor.predict(train_tsdf, test_tsdf)
+```
+
+```{python}
+# visualize predictions
+from tabpfn_time_series.plot import plot_pred_and_actual_ts
+
+plot_pred_and_actual_ts(
+    train=train_tsdf,
+    test=test_tsdf_ground_truth,
+    pred=pred,
+)
+```
